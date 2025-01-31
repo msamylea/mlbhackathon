@@ -90,19 +90,14 @@ source venv/bin/activate  # On Windows, use: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Set up environment variables:
-```bash
-Create a .env file in the project root with:
-GEMINI_API_KEY=your_gemini_api_key
-```
-5. Start the Flask server:
+4. Start the Flask server:
 ```python
-python app.py
+python main.py
 ```
 
-6. Open a web browser and navigate to:
+5. Open a web browser and navigate to:
 ```bash
-http://localhost:5000
+http://localhost:8080
 ```
 
 ***
@@ -135,7 +130,7 @@ http://localhost:5000
 
 ```text
 mlb-historical-simulator/
-├── app.py                # Flask application entry
+├── main.py                # Flask application entry
 ├── calculations/         # Statistical modules
 │   ├── gameplay_calcs.py
 │   └── hit_distance_calc.py
