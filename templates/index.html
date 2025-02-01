@@ -181,9 +181,7 @@
                 <div class="fixed inset-0 flex items-center justify-center bg-gray-700 bg-opacity-75 z-50 hidden" id="loadingSpinner">
                     <div class="spinner-border animate-spin inline-block w-12 h-12 rounded-full border-4 border-solid border-current border-e-transparent text-surface motion-reduce:animate-[spin_1.5s_linear_infinite] dark:text-white" role="status">
                         <span class="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]"></span>
-                        <div class="sr-only">
-                        <span>Loading Team Data and Generating Game....</span></div>
-                        </div>
+                                                </div>
                     </div>
                 </div>
           
@@ -200,7 +198,16 @@
         </div>
     </div>
     <script>
-        let socket = io();
+        let socket = io({
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 60000,
+            autoConnect: true
+        });
+        const tableSPinner = document.getElementById('tableSpinner');
         const loadingSpinner = document.getElementById('loadingSpinner');
         const simulateBtn = document.getElementById('simulateBtn');
         const logContent = document.getElementById('logContent');
@@ -514,25 +521,15 @@
                 }
 
         
-        async function fetchTeamDetails(teamId, year) {
-            try {
-                // Only fetch if we have both valid teamId and year
-                if (!teamId || !year || year === 'undefined') {
-                    console.warn('Missing teamId or year:', { teamId, year });
-                    return null;
+            async function fetchTeamDetails(teamId, season) {
+                    // Clean URL construction
+                    const url = `/api/team_details/${teamId}${season ? `?season=${season}` : ''}`.replace(/:1$/, '');
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return await response.json();
                 }
-        
-                const response = await fetch(`/api/team_details/${teamId}?season=${year}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                return data;
-            } catch (error) {
-                console.error('Error fetching team details:', error);
-                return null;
-            }
-        }
 
                 
         // Helper function for formatting scores
@@ -590,46 +587,42 @@
             }
         }
 
-        function getFromCache(key) {
-            const cached = localStorage.getItem(key);
-            return cached ? JSON.parse(cached) : null;
-        }
-        
-        function setInCache(key, data) {
-            localStorage.setItem(key, JSON.stringify(data));
-        }
-
         // Helper function to populate years dropdown
         async function populateYears(teamId, yearSelect) {
-    try {
-        const cacheKey = `team_${teamId}_details`;
-        let data = getFromCache(cacheKey);
+        try {
+            
+            let data; 
 
-        if (!data) {
             yearSelect.innerHTML = '<option value="">Loading years...</option>';
-            const response = await fetch(`/api/team_details/${teamId}`);
+
+            const url = `/api/team_details/${teamId}`.replace(/:1$/, '');
+            const response = await fetch(url);
             data = await response.json();
-            setInCache(cacheKey, data);
+               
+            // Check if data and required properties exist
+            if (!data.details.firstYearOfPlay) {
+                console.error('First Year of Play not found:', data);
+                // Default to 1920 if no valid year is found
+                data = { details: { firstYearOfPlay: 1920 } };
+            }
+    
+            const startYear = Math.max(data.details.firstYearOfPlay, 1920);
+            const endYear = new Date().getFullYear();
+    
+            const options = ['<option value="">Select year</option>'];
+            for (let year = endYear; year >= startYear + 2; year--) {
+                options.push(`<option value="${year}">${year}</option>`);
+            }
+    
+            yearSelect.innerHTML = options.join('');
+            yearSelect.disabled = false;
+            yearSelect.value = "2023";
+        } catch (error) {
+            console.error('Error loading team years:', error);
+            yearSelect.innerHTML = '<option value="">Error loading years</option>';
+            yearSelect.disabled = true;
         }
-
-        const startYear = Math.max(data.details.firstYearOfPlay, 1920);
-        const endYear = new Date().getFullYear();
-
-        const options = ['<option value="">Select year</option>'];
-        for (let year = endYear; year >= startYear + 2; year--) {
-            options.push(`<option value="${year}">${year}</option>`);
-        }
-
-        yearSelect.innerHTML = options.join('');
-        yearSelect.disabled = false;
-        yearSelect.value = "2023";
-        
-        checkEnableSimulate();
-    } catch (error) {
-        console.error('Error loading team years:', error);
-        yearSelect.innerHTML = '<option value="">Error loading years</option>';
     }
-}
 
 
        // Event listeners for team selection
@@ -728,13 +721,7 @@
                     // Show loading state
                     homeTeamSelect.innerHTML = '<option value="">Loading teams...</option>';
                     awayTeamSelect.innerHTML = '<option value="">Loading teams...</option>';
-        
-                    const cachedTeams = getFromCache('mlbTeams');
-                    if (cachedTeams) {
-                        populateTeamDropdowns(cachedTeams);
-                    }
-
-                    // Fetch fresh data
+                       // Fetch fresh data
                     const response = await fetch('/api/teams', {
                         headers: {'Cache-Control': 'no-cache'}
                     });
@@ -744,10 +731,8 @@
                     }
         
                     const teams = await response.json();
-                    setInCache('mlbTeams', teams);
-                    if (!cachedTeams) {
-                        populateTeamDropdowns(teams);
-                    }
+                    populateTeamDropdowns(teams);
+            
 
                   
         
@@ -790,6 +775,10 @@
             homeLogo.innerHTML = `<img src="${homeLogoUrl}" alt="Home Team Logo" class="w-8 h-8">`;
         }
 
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+        });
+        
         simulateBtn.addEventListener('click', async () => {
             try {
                 loadingSpinner.classList.remove('hidden');
@@ -821,9 +810,12 @@
                     const logContent = document.getElementById('logContent');
                         
                     // Show the loading spinner
+
+                    
                 
                     if (logContent) {
-                        logContent.innerHTML = ''; // Clear previous log
+                        logContent.innerHTML = ''; 
+                        logContent.appendChild(createLoadingRow());
                     }
                 
                         // Reset game state
@@ -874,6 +866,10 @@
                 }
         
             } catch (error) {
+                const loadingRow = document.getElementById('loadingRow');
+                if (loadingRow) {
+                    loadingRow.remove();
+                }
                 loadingSpinner.classList.add('hidden');
                 const errorElement = document.createElement('div');
                 errorElement.classList.add('text-red-600', 'font-bold', 'p-3', 'my-2');
@@ -1092,16 +1088,39 @@
                 return createPlayPopover(pitchData);
             }).join(', ');
         };
+
+        function createLoadingRow() {
+            const loadingRow = document.createElement('tr');
+            loadingRow.id = 'loadingRow';
+            loadingRow.className = 'border-b border-slate-200';
+            loadingRow.innerHTML = `
+                <td colspan="10" class="p-4 text-center">
+                    <div class="inline-flex items-center justify-center">
+                        <div class="w-6 h-6 border-2 border-t-transparent border-blue-500 rounded-full animate-spin"></div>
+                        <span class="ml-2 text-sm text-gray-300">Generating matchup result...</span>
+                    </div>
+                </td>
+            `;
+            return loadingRow;
+        }
+
         
         function setupSocketListeners() {
             socket.on('play_result', (data) => {
+
+            
+            
+                const existingLoadingRow = document.getElementById('loadingRow');
+                if (existingLoadingRow) {
+                    existingLoadingRow.remove();
+                }
+
                 updateLineups(data);
 
                 if (!data || !data.play_details) {
                     return;
                 }
-            
-              
+
                 const createRationalePopover = (playData, details) => {
                     const formatAction = (result, hit, fieldedOut) => {
                         switch (result) {
@@ -1302,8 +1321,7 @@
                             
                     <table class="min-w-full table-fixed">
                         <tbody>
-                            <tr class="border-b border-slate-200">
-                                <td class="p-1 w-10 text-left border-b border-slate-200 align-top">${inningDisplay}</td>
+                                                  <td class="p-1 w-10 text-left border-b border-slate-200 align-top">${inningDisplay}</td>
                                 <td class="p-1 w-10 text-left border-b border-slate-200 align-top">${formatOuts()}</td>
                                 <td class="p-1 w-36 text-left border-b border-slate-200 align-top">
                                     <div class="text-xs whitespace-pre-line">${baseRunnersDisplay}</div>
@@ -1336,14 +1354,14 @@
             // Update DOM
             playElement.innerHTML = playContent;
         
-            const logContent = document.getElementById('logContent');
         
+            const logContent = document.getElementById('logContent');
             if (logContent) {
                 loadingSpinner.classList.add('hidden');
                 logContent.appendChild(playElement);
+                // Add a new loading row for the next play
+                logContent.appendChild(createLoadingRow());
                 logContent.scrollTop = logContent.scrollHeight;
-            } else {
-                console.error('Could not find logContent element');
             }
         
             // Update scoreboard and other displays
@@ -1521,6 +1539,10 @@
         // Error handling
         socket.on('game_error', (data) => {
             console.error('Game error:', data); // Debug log
+            const loadingRow = document.getElementById('loadingRow');
+                if (loadingRow) {
+                    loadingRow.remove();
+                }
             
             const errorElement = document.createElement('div');
             errorElement.classList.add('text-red-600', 'font-bold', 'p-3', 'my-2');
